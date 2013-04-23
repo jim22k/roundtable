@@ -10,7 +10,7 @@ Includes features such as:
 Author: Jim Kitchen
 Created: 2012-09-12
 '''
-__version__ = 0.2
+__version__ = '0.2'
 
 from ._table import Table
 from ._lookuptable import LookupTable, DuplicateKeyError

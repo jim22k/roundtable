@@ -126,25 +126,28 @@ class TestRowCreation:
 class TestRowAccess:
     '''Test __getitem__'''
     def setUp(self):
-        self.headers = ['x', 'y', 'z']
+        self.headers = ['x', 'y', 'z', 'CapCol']
         self.table = Table(self.headers)
-        self.table.append((1,2,3.5))
+        self.table.append((1,2,3.5,14))
         self.row = self.table[0]
     
     def test_access_by_index(self):
         assert self.row[0] == 1
         assert self.row[1] == 2
         assert self.row[2] == 3.5
+        assert self.row[3] == 14
     
     def test_access_by_reverse_index(self):
-        assert self.row[-1] == 3.5
-        assert self.row[-2] == 2
-        assert self.row[-3] == 1
+        assert self.row[-1] == 14
+        assert self.row[-2] == 3.5
+        assert self.row[-3] == 2
+        assert self.row[-4] == 1
     
     def test_access_by_column_name(self):
         assert self.row['x'] == 1
         assert self.row['y'] == 2
         assert self.row['z'] == 3.5
+        assert self.row['CapCol'] == 14
     
     @raises(TypeError)
     def test_access_by_slice(self):
@@ -152,11 +155,11 @@ class TestRowAccess:
     
     @raises(IndexError)
     def test_access_index_error(self):
-        self.row[5]
+        self.row[7]
     
     @raises(IndexError)
     def test_access_index_error_reverse(self):
-        self.row[-5]
+        self.row[-7]
     
     @raises(KeyError)
     def test_access_key_error(self):
@@ -166,6 +169,10 @@ class TestRowAccess:
     def test_access_by_attribute(self):
         '''Common error: DataFrame lets you do this, but simpletable doesn't'''
         self.row.z
+    
+    def test_access_by_capital_attribute(self):
+        '''This is allowed, if names is valid and starts with a capital letter'''
+        assert self.row.CapCol == 14
     
 class TestRowUpdate:
     '''Test __setitem__ and __delitem__'''

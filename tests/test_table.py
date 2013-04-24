@@ -1,5 +1,6 @@
 from nose.tools import raises
 from roundtable import Table
+import copy
 
 def test_build_row_with_strings():
     t = Table(['x', 'y', 'z'])
@@ -40,22 +41,11 @@ class TestTableEquivalency:
         assert self.t != t2
 
     def test_table_copy(self):
-        q = self.t.copy()
+        q = copy.copy(self.t)
         assert self.t is not q
         assert self.t == q
         assert self.t[0] is q[0]
         assert self.t[1] is q[1]
-    
-    def test_table_copy_copy(self):
-        """copy.copy pickles the Table, so the Row objects are '==', but not 'is'"""
-        import copy
-        q = copy.copy(self.t)
-        assert self.t is not q
-        assert self.t == q
-        assert self.t[0] is not q[0]
-        assert self.t[0] == q[0]
-        assert self.t[1] is not q[1]
-        assert self.t[1] == q[1]
 
 class TestTableAddRemoveRows:
     '''Test append, extend, insert, pop, del'''
@@ -364,6 +354,61 @@ class TestTableDeletion:
     def test_del_cell_by_bad_tuple(self):
         del self.t[0,1,2]
 
+class TestTableSearching:
+    '''Test __contains__, index, count'''
+    def setUp(self):
+        self.headers = ['x', 'y', 'z']
+        self.t = Table(self.headers)
+        self.t.append((1,2,3))
+        self.t.append((4,5,6))
+        self.t.append((7,8,9))
+        self.t.append((1,2,3))
+        self.t.append((5,))
+    
+    def test_contains_simple(self):
+        assert self.t[0] in self.t
+    
+    def test_contains_tuple(self):
+        assert (5,) in self.t
+        assert [5] in self.t
+    
+    def test_contains_dict(self):
+        assert {'x': 5} in self.t
+        assert {'z': 6, 'y': 5, 'x': 4} in self.t
+    
+    def test_count_row(self):
+        assert self.t.count(self.t[0]) == 2
+        assert self.t.count(self.t[1]) == 1
+    
+    def test_count_tuple(self):
+        assert self.t.count((1,2,3)) == 2
+        assert self.t.count((4,5,6)) == 1
+        assert self.t.count((0,0,0)) == 0
+    
+    def test_count_dict(self):
+        assert self.t.count({'x': 5}) == 1
+    
+    def test_index_single(self):
+        assert self.t.index(self.t[1]) == 1
+    
+    def test_index_twice(self):
+        assert self.t.index(self.t[0]) == 0
+        assert self.t.index(self.t[0], 1) == 3
+    
+    def test_index_tuple(self):
+        assert self.t.index((4,5,6)) == 1
+    
+    def test_index_dict(self):
+        assert self.t.index({'x': 5}) == 4
+    
+    @raises(ValueError)
+    def test_index_missing(self):
+        self.t.index((0,0,0))
+    
+    @raises(ValueError)
+    def test_index_too_far(self):
+        self.t.index(self.t[0], 4)
+
 class TestTableSorting:
     '''Test sort, sort_by_col, reverse'''
     def setUp(self):
@@ -377,38 +422,38 @@ class TestTableSorting:
         self.t.append((16,0,1))
     
     def test_sort_by_single_col(self):
-        self.t.sort_by_col('y')
+        self.t.sort('y')
         assert list(self.t.column('y')) == [-5, 0, 2, 8, 11, 11]
         assert self.t[0] == (1,-5,6)
         assert self.t[-2] == (10,11,-12)
         assert self.t[-1] == (-13,11,15)
     
     def test_sort_by_single_col_numeric(self):
-        self.t.sort_by_col(1)
+        self.t.sort(1)
         assert list(self.t.column('y')) == [-5, 0, 2, 8, 11, 11]
         assert self.t[0] == (1,-5,6)
         assert self.t[-2] == (10,11,-12)
         assert self.t[-1] == (-13,11,15)
     
     def test_sort_by_multiple_col(self):
-        self.t.sort_by_col(['x', 'z'])
+        self.t.sort(['x', 'z'])
         assert list(self.t.column('x')) == [-13, -1, 1, 1, 10, 16]
         assert list(self.t.column('z')) == [15, 9, 6, 9, -12, 1]
     
     def test_sort_by_multiple_col_numeric(self):
-        self.t.sort_by_col([0, 2])
+        self.t.sort([0, 2])
         assert list(self.t.column('x')) == [-13, -1, 1, 1, 10, 16]
         assert list(self.t.column('z')) == [15, 9, 6, 9, -12, 1]
     
     def test_sort_by_single_col_reverse(self):
-        self.t.sort_by_col('y', reverse=True)
+        self.t.sort('y', reverse=True)
         assert list(self.t.column('y')) == [11, 11, 8, 2, 0, -5]
         # Even though the sort order is reversed, in the case of equal numbers
         # the original row ordering remains
         assert list(self.t.column('z')) == [-12, 15, 9, 9, 1, 6]
     
     def test_sort_by_multiple_col_reverse(self):
-        self.t.sort_by_col(['z', 'y', 'x'], reverse=True)
+        self.t.sort(['z', 'y', 'x'], reverse=True)
         assert self.t[0] == (-13,11,15)
         assert self.t[1] == (-1,8,9)
         assert self.t[2] == (1,2,9)

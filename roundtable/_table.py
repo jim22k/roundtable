@@ -8,6 +8,7 @@ import re as _re
 import itertools as _itertools
 import functools as _functools
 import operator as _operator
+import types as _types
 
 class RowFactory(object):
     cache = {}
@@ -25,7 +26,8 @@ class RowFactory(object):
     def _build(headers_):
         @_functools.total_ordering
         class Row(object):
-            __slots__ = ['_col%d' % i for i in range(len(headers_))]
+            __slots__ = [h if _re.match(r'[A-Z][A-Za-z0-9_]*$', h) else '_col%d' % i
+                         for i, h in enumerate(headers_)]
             _mapper = {}
             for i, h in enumerate(headers_):
                 _mapper[i] = __slots__[i] # reference by index
@@ -71,6 +73,10 @@ class RowFactory(object):
                         raise IndexError('Row index out of range')
                     else:
                         raise KeyError("Row has no column named '%s'" % str(key))
+                except TypeError:
+                    if isinstance(key, slice):
+                        return tuple(self)[key]
+                    raise
             
             def __setitem__(self, key, value):
                 try:
@@ -89,23 +95,34 @@ class RowFactory(object):
                         raise IndexError('Row index out of range')
                     else:
                         raise KeyError("Row has no column named '%s'" % str(key))
+                except TypeError:
+                    if isinstance(key, slice):
+                        for i in range(len(self))[key]:
+                            del self[i]
+                    else:
+                        raise
+            
+            def __delattr__(self, name):
+                setattr(self, name, None)
             
             def __eq__(self, other):
-                try:
+                if isinstance(other, Row):
                     return tuple(self) == tuple(other)
+                try:
+                    return self == Row(other)
                 except TypeError:
                     return NotImplemented
             
             def __lt__(self, other):
-                try:
+                if isinstance(other, Row):
                     return tuple(self) < tuple(other)
+                try:
+                    return self < Row(other)
                 except TypeError:
                     return NotImplemented
-        # Add upper-case property accessors
-        for h in headers_:
-            if _re.match(r'[A-Z][A-Za-z0-9_]*$', h):
-                attr = Row._mapper[h]
-                setattr(Row, h, property(lambda self, attr=attr: getattr(self, attr)))
+            
+            #TODO: add an update(dict_or_iterable) method
+            
         return Row
     
     @staticmethod
@@ -121,48 +138,6 @@ class RowFactory(object):
             del RowFactory.count[headers]
 
 class Table(object):
-    '''
-    Pure Python implementation of a table with string column names
-    The table behaves very similar to a list of namedtuple, but allowing
-        items within the namedtuple to be modified
-    
-    The Table is created with a list of column names
-        These are fixed and cannot change after creating the Table
-    Data is added and removed by row(s) using list-like syntax
-        (append, extend, insert, pop, __getitem__, __delitem__).
-        Values provided must be either an iterable or a dict of column names.
-        Partial rows are allowed (missing cells will contain None).
-    Table rows can be modified using reverse, sort, sort_by_col
-    Views into the Table can be created using copy() or take().
-        Modification of existing rows in a view will modify the
-        original Table, but rearranging, adding, or removing rows
-        will not affect the original Table.
-        
-    Rows can be accessed:
-    - By index :            Returns a Row object     mytable[0]; mytable[-1]
-    - By slice :            Returns a Table view     mytable[0:10:2]
-    
-    Cells can be accessed:
-    - By index (from Row) :  Returns a value             mytable[0][0]; mytable[0][-1]
-               (from Table)                              mytable[0, 0]; mytable[0, -1]
-    - By name (from Row) :   Returns a value             mytable[0]['Col2']
-              (from Table)                               mytable[0, 'Col2']
-    
-    As a special case, if a column name matches [A-Z][A-Za-z0-9_]*$
-        (i.e. it is a valid Python variable name and starts with a capital letter)
-        then an attribute will be added to the Row object allowing access.
-        The requirement to start with a capital letter avoids conflicts with
-        other attributes and functions of the Row object.
-        
-        Cell access (from Row) : Returns a value         mytable[0].Col2
-    
-    Data can be accessed column-wise through the .column(index_or_name) method.
-        This returns an iterator to access items in the specified column.
-    
-    Table object can be transformed into:
-    - NumPy Array :      mytable.as_array()
-    - Pandas DataFrame:  mytable.as_dataframe()
-    '''
     def __init__(self, headers):
         '''
         headers : strings or int
@@ -251,6 +226,20 @@ class Table(object):
         self.Row = RowFactory.build(self.headers)
         self._rows = map(self.Row, self._rows)
     
+    def __copy__(self):
+        '''
+        Returns a shallow copy of the table
+        This can be used to get slices of the table via .filter()
+            ex. mytable.copy().filter(filter_func)
+        
+        This method is faster than using copy.copy because it avoids
+            pickling and unpickling the data
+        For a deep copy, use copy.deepcopy
+        '''
+        r = Table(self.headers)
+        r._rows = self._rows[:]
+        return r
+    
     def append(self, row):
         '''
         row can be: Row object, dict, or iterable
@@ -274,20 +263,6 @@ class Table(object):
             row = self.Row(row)
         self._rows.insert(index, row)
     
-    def copy(self):
-        '''
-        Returns a shallow copy of the table
-        This can be used to get slices of the table via .filter()
-            ex. mytable.copy().filter(filter_func)
-        
-        This method is faster than using copy.copy because it avoids
-            pickling and unpickling the data
-        For a deep copy, use copy.deepcopy
-        '''
-        r = Table(self.headers)
-        r._rows = self._rows[:]
-        return r
-    
     def pop(self, index=-1):
         '''
         Remove index row from the table and return it
@@ -300,22 +275,31 @@ class Table(object):
     
     def sort(self, key=None, reverse=False):
         '''
-        key is a function called on each Row in the Table
+        key:
+            function called on each Row in the Table
+            string or int for sort-by-column
+            list of strings or ints for sort-by-multi-column
         '''
+        if not isinstance(key, _types.FunctionType):
+            if isinstance(key, (int, basestring)):
+                key = [key]
+            key = _operator.itemgetter(*key)
         self._rows.sort(key=key, reverse=reverse)
         return self
     
-    def sort_by_col(self, col, reverse=False):
-        '''
-        Sort the rows by column or columns
-        col must be a column header string, column index, or list of string/index
-        
-        This function is syntactic sugar for sort(key=operator.itemgetter(col))
-        '''
-        if isinstance(col, (int, basestring)):
-            col = [col]
-        self._rows.sort(key=_operator.itemgetter(*col), reverse=reverse)
-        return self
+    def index(self, value, start=None, stop=None):
+        value = self.Row(value)
+        if stop is not None:
+            if start is None:
+                raise TypeError('cannot specify stop without start')
+            return self._rows.index(value, start, stop)
+        if start is not None:
+            return self._rows.index(value, start)
+        return self._rows.index(value)
+    
+    def count(self, value):
+        value = self.Row(value)
+        return self._rows.count(value)
     
     def take(self, func_or_indexes):
         '''

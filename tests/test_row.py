@@ -149,9 +149,8 @@ class TestRowAccess:
         assert self.row['z'] == 3.5
         assert self.row['CapCol'] == 14
     
-    @raises(TypeError)
     def test_access_by_slice(self):
-        self.row[0:2]
+        assert self.row[0:2] == (1,2)
     
     @raises(IndexError)
     def test_access_index_error(self):
@@ -177,34 +176,47 @@ class TestRowAccess:
 class TestRowUpdate:
     '''Test __setitem__ and __delitem__'''
     def setUp(self):
-        self.headers = ['x', 'y', 'z']
+        self.headers = ['x', 'y', 'z', 'CapCol']
         self.table = Table(self.headers)
-        self.table.append((1,2,3.5))
+        self.table.append((1,2,3.5,14))
         self.row = self.table[0]
     
     def test_set_value_by_index(self):
         self.row[1] = 42
-        assert tuple(self.row) == (1, 42, 3.5)
+        assert tuple(self.row) == (1, 42, 3.5, 14)
     
     def test_set_value_by_reverse_index(self):
         self.row[-1] = 15
-        assert tuple(self.row) == (1, 2, 15)
+        assert tuple(self.row) == (1, 2, 3.5, 15)
     
     def test_set_value_by_column_name(self):
         self.row['x'] = -500
-        assert tuple(self.row) == (-500, 2, 3.5)
+        assert tuple(self.row) == (-500, 2, 3.5, 14)
+    
+    def test_set_value_by_capcol(self):
+        self.row.CapCol = -500
+        assert tuple(self.row) == (1, 2, 3.5, -500)
     
     def test_del_value_by_index(self):
         del self.row[0]
-        assert tuple(self.row) == (None, 2, 3.5)
+        assert tuple(self.row) == (None, 2, 3.5, 14)
     
     def test_del_value_by_reverse_index(self):
         del self.row[-1]
-        assert tuple(self.row) == (1, 2, None)
+        assert tuple(self.row) == (1, 2, 3.5, None)
     
     def test_del_value_by_column_name(self):
         del self.row['y']
-        assert tuple(self.row) == (1, None, 3.5)
+        assert tuple(self.row) == (1, None, 3.5, 14)
+    
+    def test_del_values_by_slice(self):
+        del self.row[0:2]
+        print self.row
+        assert tuple(self.row) == (None, None, 3.5, 14)
+    
+    def test_del_value_by_capcol(self):
+        del self.row.CapCol
+        assert tuple(self.row) == (1, 2, 3.5, None)
     
     @raises(IndexError)
     def test_set_value_bad_index(self):

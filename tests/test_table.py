@@ -624,7 +624,7 @@ class TestTableConversion:
         assert np.all(a == ta)
         assert a is not ta
     
-    def test_dataframe(self):
+    def test_dataframe_square(self):
         import pandas as pd
         tp = self.t.as_dataframe()
         assert isinstance(tp, pd.DataFrame)
@@ -635,4 +635,16 @@ class TestTableConversion:
         assert (tp.columns == df.columns).all()
         assert (tp == df).all().all()
         assert tp is not df
-        
+    
+    def test_dataframe_nonsquare(self):
+        import pandas as pd
+        self.t.append((-1,-1,-1))
+        tp = self.t.as_dataframe()
+        assert isinstance(tp, pd.DataFrame)
+        df = pd.DataFrame({'x': [1,4,7,-1],
+                           'y': [2,5,8,-1],
+                           'z': [3,6,9,-1]})
+        assert len(tp) == len(df)
+        assert (tp.columns == df.columns).all()
+        assert (tp == df).all().all()
+        assert tp is not df

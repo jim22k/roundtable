@@ -39,7 +39,7 @@ class TestRowCreation:
     def test_new_row_from_iterable(self):
         r = self.Row((1,2,3)) # tuple
         r = self.Row([1,2,3]) # list
-        r = self.Row(xrange(3)) # xrange
+        r = self.Row(range(3)) # range
         def gene8r():
             for i in range(3):
                 yield i
@@ -211,7 +211,6 @@ class TestRowUpdate:
     
     def test_del_values_by_slice(self):
         del self.row[0:2]
-        print self.row
         assert tuple(self.row) == (None, None, 3.5, 14)
     
     def test_del_value_by_capcol(self):

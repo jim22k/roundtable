@@ -4,11 +4,17 @@ _table.py
 Author: Jim Kitchen
 Created: 2012-09-12
 '''
-import re as _re
-import itertools as _itertools
-import functools as _functools
-import operator as _operator
-import types as _types
+import re, types, operator, itertools, collections
+
+try:
+    basestring = basestring # py 2.x
+except NameError:
+    basestring = str # py 3.x
+
+try:
+    zip_longest = itertools.zip_longest # py 3.x
+except AttributeError:
+    zip_longest = itertools.izip_longest # py 2.x
 
 class RowFactory(object):
     cache = {}
@@ -24,9 +30,8 @@ class RowFactory(object):
     
     @staticmethod
     def _build(headers_):
-        @_functools.total_ordering
         class Row(object):
-            __slots__ = [h if _re.match(r'[A-Z][A-Za-z0-9_]*$', h) else '_col%d' % i
+            __slots__ = [h if re.match(r'[A-Z][A-Za-z0-9_]*$', h) else '_col%d' % i
                          for i, h in enumerate(headers_)]
             _mapper = {}
             for i, h in enumerate(headers_):
@@ -52,7 +57,7 @@ class RowFactory(object):
                     if not hasattr(dict_or_iterable, '__len__'):
                         dict_or_iterable = list(dict_or_iterable)
                     itemcount = max(len(self), len(dict_or_iterable))
-                    for i, item in _itertools.izip_longest(xrange(itemcount), dict_or_iterable):
+                    for i, item in zip_longest(range(itemcount), dict_or_iterable):
                         self[i] = item
             
             def __str__(self):
@@ -97,8 +102,12 @@ class RowFactory(object):
                         raise KeyError("Row has no column named '%s'" % str(key))
                 except TypeError:
                     if isinstance(key, slice):
-                        for i in range(len(self))[key]:
-                            del self[i]
+                        try:
+                            for i in range(len(self))[key]:
+                                del self[i]
+                        except TypeError: # py 3.1 can't use slice on range object
+                            for i in list(range(len(self)))[key]:
+                                del self[i]
                     else:
                         raise
             
@@ -120,6 +129,15 @@ class RowFactory(object):
                     return self < Row(other)
                 except TypeError:
                     return NotImplemented
+            
+            def __le__(self, other):
+                return self < other or self == other
+            
+            def __gt__(self, other):
+                return not (self < other or self == other)
+            
+            def __ge__(self, other):
+                return not self < other
             
             #TODO: add an update(dict_or_iterable) method
             
@@ -280,10 +298,10 @@ class Table(object):
             string or int for sort-by-column
             list of strings or ints for sort-by-multi-column
         '''
-        if not isinstance(key, _types.FunctionType):
+        if not isinstance(key, types.FunctionType):
             if isinstance(key, (int, basestring)):
                 key = [key]
-            key = _operator.itemgetter(*key)
+            key = operator.itemgetter(*key)
         self._rows.sort(key=key, reverse=reverse)
         return self
     
@@ -307,8 +325,8 @@ class Table(object):
         or where func(row) returns True
         '''
         r = Table(self.headers)
-        if callable(func_or_indexes):
-            r._rows = filter(func_or_indexes, self._rows)
+        if isinstance(func_or_indexes, collections.Callable):
+            r._rows = list(filter(func_or_indexes, self._rows))
         else:
             r._rows = [self._rows[i] for i in func_or_indexes]
         return r
@@ -355,5 +373,6 @@ class Table(object):
             import pandas
         except ImportError:
             raise ImportError('as_dataframe() requires pandas')
-        return pandas.DataFrame(self._rows, columns=self.headers,
+        return pandas.DataFrame([tuple(row) for row in self._rows],
+                                columns=self.headers,
                                 index=index, dtype=dtype)

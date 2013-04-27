@@ -1,5 +1,6 @@
 from nose.tools import raises
 from roundtable import LookupTable, DuplicateKeyError
+import collections
 
 class TestCreateLookupTable:
     def setUp(self):
@@ -14,7 +15,7 @@ class TestCreateLookupTable:
     def test_build_row_with_int(self):
         t = LookupTable(5, 'id')
         assert len(t.headers) == 5
-        assert callable(t.lookup)
+        assert isinstance(t.lookup, collections.Callable)
     
     def test_build_func(self):
         t = LookupTable(self.headers, self.func)

@@ -4,8 +4,13 @@ _lookuptable.py
 Author: Jim Kitchen
 Created: 2012-09-12
 '''
-import operator as _operator
+import operator, collections
 from ._table import Table
+
+try:
+    basestring = basestring # py 2.x
+except NameError:
+    basestring = str # py 3.x
 
 class DuplicateKeyError(Exception):
     '''
@@ -38,11 +43,11 @@ class LookupTable(Table):
             .remove(key) -> removes the row associated with key
         '''
         super(LookupTable, self).__init__(headers)
-        if not callable(lookup):
+        if not isinstance(lookup, collections.Callable):
             if isinstance(lookup, basestring):
                 lookup = [lookup]
             self._lookup_comp = tuple(lookup)
-            lookup = _operator.itemgetter(*lookup)
+            lookup = operator.itemgetter(*lookup)
         self.lookup = lookup
         self._index = {}
     
@@ -282,7 +287,7 @@ class LookupTable(Table):
         '''
         lookup = getattr(self, '_lookup_comp', self.lookup)
         r = LookupTable(self.headers, lookup)
-        if callable(func_or_indexes):
+        if isinstance(func_or_indexes, _collections.Callable):
             r._rows = filter(func_or_indexes, self._rows)
         else:
             r._rows = [self._rows[i] for i in func_or_indexes]

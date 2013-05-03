@@ -4,31 +4,93 @@ _lookuptable.py
 Author: Jim Kitchen
 Created: 2012-09-12
 '''
-import operator, collections
+import operator, collections, copy, itertools
 from ._table import Table
 
 try:
     basestring = basestring # py 2.x
+    range = xrange
 except NameError:
     basestring = str # py 3.x
 
-class DuplicateKeyError(Exception):
+try:
+    zip_longest = itertools.zip_longest # py 3.x
+except AttributeError:
+    zip_longest = itertools.izip_longest # py 2.x
+
+def row_upgrade(RowClass, lookup, callback):
     '''
-    Raised when attempting to add a new row to a LookupTable with a key
-    matching an existing row in the table
+    RowClass is a Row class from a regular Table
+    lookup is a function called on self
+    callback is called whenever the values in self change
     
-    Every effort is made to ensure that this error is raised before
-    a change is made to the LookupTable
+    Callback arguments are (self, prev_lookup_value, new_lookup_value)
+    This allows the LookupTable to update its index properly
     '''
-    pass
+    class Row(RowClass):
+        _lookup_func = lookup
+        _callback = callback
+        
+        def __init__(self, dict_or_iterable):
+            if isinstance(dict_or_iterable, dict):
+                # Make shallow copy of dict to avoid modifing passed in dict
+                d = dict_or_iterable.copy()
+                # Fill values from dict, fill missing headers with None
+                for h in self.headers:
+                    super(Row, self).__setitem__(h, d.pop(h, None))
+                # If any keys remain in d, try to set them (will cause KeyError)
+                for key in d:
+                    super(Row, self).__setitem__(key, d[key])
+            else:
+                # Fill values, fill missing indexes with None
+                # Iterable longer than Row will cause IndexError
+                if not hasattr(dict_or_iterable, '__len__'):
+                    dict_or_iterable = list(dict_or_iterable)
+                itemcount = max(len(self), len(dict_or_iterable))
+                for i, item in zip_longest(range(itemcount), dict_or_iterable):
+                    super(Row, self).__setitem__(i, item)
+        
+        def __setitem__(self, key, value):
+            print('LookupRow setitem')
+            prev_lookup_value = self._lookup()
+            super(Row, self).__setitem__(key, value)
+            Row._callback(self, prev_lookup_value)
+        
+        def __delitem__(self, key):
+            prev_lookup_value = self._lookup()
+            super(Row, self).__delitem__(key)
+            Row._callback(self, prev_lookup_value)
+        
+        def __setattr__(self, name, value):
+            prev_lookup_value = self._lookup()
+            super(Row, self).__setattr__(name, value)
+            Row._callback(self, prev_lookup_value)
+        
+        def __delattr__(self, name):
+            prev_lookup_value = self._lookup()
+            super(Row, self).__delattr__(name)
+            Row._callback(self, prev_lookup_value)
+        
+        def update(self, d):
+            prev_lookup_value = self._lookup()
+            super(Row, self).update(d)
+            Row._callback(self, prev_lookup_value)
+        
+        def _lookup(self):
+            return Row._lookup_func(self)
+    return Row
 
 class LookupTable(Table):
+    '''
+    Adds a lookup mechanism to the table giving O(1) row lookups
+    
+    All seach methods (`index`, `count`, `__contains__`) accept either
+    a Row object (which is run through the lookup function)
+    or the "lookup" value.  The "lookup" values do not need to be unique.
+    '''
+    
     def __init__(self, headers, lookup):
         '''
-        Adds a lookup mechanism to the table giving O(1) row lookups
-        Each row in the table must have a unique key associated with it
-        Conflicts will raise a DuplicateKeyError
-        
         headers : strings or int
             strings -> the column headers names
             int -> the desired number of column headers, filled it with default names
@@ -36,11 +98,6 @@ class LookupTable(Table):
             function -> takes a Row object and returns a unique key
             column -> uses the value in column as the unique key
             columns -> creates a tuple from values in columns as the unique key
-        
-        LookupTable additional methods
-            .lookup(key) -> returns the Row associated with key
-            .index(key) -> returns the row index associated with key
-            .remove(key) -> removes the row associated with key
         '''
         super(LookupTable, self).__init__(headers)
         if not isinstance(lookup, collections.Callable):
@@ -48,8 +105,8 @@ class LookupTable(Table):
                 lookup = [lookup]
             self._lookup_comp = tuple(lookup)
             lookup = operator.itemgetter(*lookup)
-        self.lookup = lookup
-        self._index = {}
+        self.Row = row_upgrade(self.Row, lookup, self._row_update)
+        self._index = {} # {lookup value: [indexes]}
     
     def __repr__(self):
         return 'LookupTable<%d Rows>' % len(self._rows)
@@ -62,7 +119,7 @@ class LookupTable(Table):
                 raise TypeError('LookupTable index by tuple must be 2-tuple indicating (row, column)')
             return self._rows[index[0]][index[1]]
         elif isinstance(index, slice): # table[0:10:2] -> new LookupTable
-            lookup = getattr(self, '_lookup_comp', self.lookup)
+            lookup = getattr(self, '_lookup_comp', self.Row._lookup)
             r = LookupTable(self.headers, lookup)
             r._rows = self._rows[index]
             r._update_indexes()
@@ -74,94 +131,59 @@ class LookupTable(Table):
         if isinstance(index, int):
             if not isinstance(rowvalue, self.Row):
                 rowvalue = self.Row(rowvalue)
-            # Check for duplicate keys
+            # Remove old lval
             oldrow = self._rows[index]
-            oldkey = self.lookup(oldrow)
+            old_lval = oldrow._lookup()
+            self._index[old_lval].remove(index)
+            if not self._index[old_lval]:
+                del self._index[old_lval]
+            # Add new lval
             newrow = rowvalue
-            newkey = self.lookup(newrow)
-            # Update index keys if newrow has a different key than oldkey
-            if newkey != oldkey:
-                self._check_key(newkey)
-                del self._index[oldkey]
-                self._index[newkey] = index
+            new_lval = newrow._lookup()
+            if new_lval not in self._index:
+                self._index[new_lval] = [index]
+            else:
+                self._index[new_lval].append(index)
+                self._index[new_lval].sort()
             self._rows[index] = newrow
         elif isinstance(index, tuple):
             if len(index) != 2:
                 raise TypeError('LookupTable index by tuple must be 2-tuple indicating (row, column)')
             irow, icol = index
-            # Check for duplicate keys caused by updating item
-            oldrow = self._rows[irow]
-            oldkey = self.lookup(oldrow)
-            newrow = self.Row(oldrow) # create a new row to avoid modifying existing row before the check
-            newrow[icol] = rowvalue
-            newkey = self.lookup(newrow)
-            # Update index keys if updating cell changes key
-            if newkey != oldkey:
-                self._check_key(newkey)
-                del self._index[oldkey]
-                self._index[newkey] = irow
             self._rows[irow][icol] = rowvalue
         elif isinstance(index, slice):
-            if not isinstance(rowvalue, Table):
-                raise TypeError('setitem using slice must be passed a Table')
-            if rowvalue.Row is not self.Row:
+            if not isinstance(rowvalue, LookupTable):
+                raise TypeError('setitem using slice must be passed a LookupTable')
+            if rowvalue.Row.headers != self.Row.headers:
                 raise TypeError('setitem using slice must have the same Row for both Tables')
-            # Check for duplicate keys caused by updating items
-            # Needs to comprehend cyclical reordering of rows
-            oldrows = set(self._rows[index])
-            oldkeys = set(map(self.lookup, oldrows))
-            newrows = rowvalue
-            newkeys = set(map(self.lookup, newrows))
-            # Validate new index keys
-            if len(newkeys) < len(newrows):
-                raise DuplicateKeyError('Duplicate keys exist in newly added rows')
-            for newkey in newkeys:
-                if newkey in oldkeys:
-                    # oldkeys will be removed, so not a real conflict
-                    continue
-                self._check_key(newkey)
             # Update rows and indexes
-            self._rows[index] = newrows._rows
-            for oldkey in oldkeys:
-                del self._index[oldkey]
+            self._rows[index] = rowvalue._rows
             self._update_indexes()
         else:
             raise TypeError('LookupTable index must be int, slice, or 2-tuple')
     
     def __delitem__(self, index):
         if isinstance(index, int): # table[0] -> remove Row
-            del self._index[self.lookup(self._rows[index])]
-            del self._rows[index]
-            self._increment_indexes(index, -1)
+            self.pop(index)
         elif isinstance(index, tuple): # table[0,0]; table[0, 'Col2'] -> cell value to None
             if len(index) != 2:
                 raise TypeError('LookupTable index by tuple must be 2-tuple indicating (row, column)')
             irow, icol = index
-            # Check for duplicate keys caused by removing item
-            oldrow = self._rows[irow]
-            oldkey = self.lookup(oldrow)
-            newrow = self.Row(oldrow)
-            del newrow[icol]
-            newkey = self.lookup(newrow)
-            # Update index keys if removing item changes key
-            if newkey != oldkey:
-                self._check_key(newkey)
-                del self._index[oldkey]
-                self._index[newkey] = irow
             del self._rows[irow][icol]
         elif isinstance(index, slice): # table[0:10:2] -> remove Rows
-            rows = self._rows[index]
-            for row in rows:
-                del self._index[self.lookup(row)]
-            del self._rows[index]
-            self._update_indexes()
+            try:
+                for i in range(len(self))[index]:
+                    self.pop(i)
+            except TypeError: # py 3.1 can't use slice on range object
+                for i in list(range(len(self)))[index]:
+                    self.pop(i)
         else:
             raise TypeError('LookupTable index must be int, slice, or 2-tuple')
     
     def __eq__(self, other):
         try:
             return ((self.headers == other.headers) and (self._rows == other._rows)
-                    and ((self.lookup == other.lookup) or (self._lookup_comp == other._lookup_comp)))
+                    and ((self.Row._lookup_func == other.Row._lookup_func) or (self._lookup_comp == other._lookup_comp)))
         except AttributeError:
             return NotImplemented
     
@@ -172,9 +194,13 @@ class LookupTable(Table):
         # Create local variables to speed up loop
         rows = self._rows
         index = self._index
-        lookup = self.lookup
-        for irow in xrange(len(self)):
-            index[look_func(rows[irow])] = irow
+        index.clear()
+        for irow, row in enumerate(self):
+            lval = row._lookup()
+            if lval not in index:
+                index[lval] = [irow]
+            else:
+                index[lval].append(irow)
     
     def _increment_indexes(self, start_row, inc):
         '''
@@ -182,13 +208,44 @@ class LookupTable(Table):
         This should be faster than generating a new index using lookup
         '''
         index = self._index
-        for key, irow in index.iteritems():
-            if irow >= start_row:
-                index[key] += inc
+        try:
+            itervalues = index.itervalues() # py 2.x
+        except AttributeError:
+            itervalues = index.values() # py 3.x
+        for irows in itervalues:
+            for i, irow in enumerate(irows):
+                if irow >= start_row:
+                    irows[i] += inc
     
-    def _check_key(self, key):
-        if key in self._index:
-            raise DuplicateKeyError('%s is already a key in the LookupTable' % key)
+    def _row_update(self, row, prev_lval):
+        # Does index need to be updated?
+        new_lval = row._lookup()
+        if new_lval == prev_lval:
+            return
+        # Find the matching index(es) using previous lookup value
+        # Can be multiple if user added same row object multiple times
+        indexes = self._index[prev_lval]
+        matching = [ind for ind in indexes if self[ind] is row]
+        for match in matching:
+            # Remove previous index
+            indexes.remove(match)
+            if not indexes:
+                del self._index[prev_lval]
+            # Add new index
+            if new_lval not in self._index:
+                self._index[new_lval] = [ind]
+            else:
+                self._index[new_lval].append(ind)
+                self._index[new_lval].sort()
+    
+    def __copy__(self):
+        '''Returns a shallow copy of the table'''
+        lookup = getattr(self, '_lookup_comp', self.Row._lookup_func)
+        r = LookupTable(self.headers, lookup)
+        r._rows = self._rows[:]
+        # Deepcopy the index to avoid crosstalk if either is sorted or updated
+        r._index = copy.deepcopy(self._index)
+        return r
     
     def append(self, row):
         '''
@@ -196,23 +253,12 @@ class LookupTable(Table):
         '''
         if not isinstance(row, self.Row):
             row = self.Row(row)
-        key = self.lookup(row)
-        self._check_key(key)
-        self._index[key] = len(self)
+        lval = row._lookup()
+        if lval not in self._index:
+            self._index[lval] = [len(self)]
+        else:
+            self._index[lval].append(len(self))
         self._rows.append(row)
-    
-    def extend(self, rowlist):
-        '''
-        rowlist must be iterable of: Row object, dict, or iterable
-        '''
-        # Save current length in case of needing to abort for duplicate key
-        cur_len = len(self)
-        try:
-            for row in rowlist:
-                self.append(row)
-        except DuplicateKeyError:
-            del self[cur_len:]
-            raise
     
     def insert(self, index, row):
         '''
@@ -220,94 +266,115 @@ class LookupTable(Table):
         '''
         if not isinstance(row, self.Row):
             row = self.Row(row)
-        key = self.lookup(row)
-        self._check_key(key)
+        lval = row._lookup()
         self._rows.insert(index, row)
         # Increment all rows first, then add new index
         self._increment_indexes(index)
-        self._index[key] = index
-    
-    def copy(self):
-        '''
-        Returns a shallow copy of the table
-        This can be used to get slices of the table via .filter()
-            ex. mytable.copy().filter(filter_func)
-        
-        This method is faster than using copy.copy because it avoids
-            pickling and unpickling the data
-        For a deep copy, use copy.deepcopy
-        '''
-        lookup = getattr(self, '_lookup_comp', self.lookup)
-        r = LookupTable(self.headers, lookup)
-        r._rows = self._rows[:]
-        r._index = self._index.copy()
-        return r
+        if lval not in self._index:
+            self._index[lval] = [index]
+        else:
+            self._index[lval].append(index)
+            self._index[lval].sort()
     
     def pop(self, index=-1):
         '''
         Remove index row from the table and return it
         '''
-        p = self._rows.pop(index)
-        del self._index[self.lookup(p)]
+        row = self._rows.pop(index)
+        lval = row._lookup
+        # Remove index and entire entry if no matching lvals
+        self._index[lval].remove(index)
+        if not self._index[lval]:
+            del self._index[lval]
+        # Decrement all rows
         self._increment_indexes(index, -1)
-        return p
+        return row
     
     def reverse(self):
         self._rows.reverse()
         # Reverse index by subtracting each index from total length
         index = self._index
         total_len = len(self) - 1
-        for key, i in self._index.iteritems():
-            index[key] = total_len - i
+        try:
+            itervalues = index.itervalues() # py 2.x
+        except AttributeError:
+            itervalues = index.values() # py 3.x
+        for irows in itervalues:
+            for i, irow in enumerate(irows):
+                irows[i] = total_len - irow
         return self
     
     def sort(self, key=None, reverse=False):
         '''
-        key is a function called on each Row in the LookupTable
+        key:
+            function called on each Row in the Table
+            string or int for sort-by-column
+            list of strings or ints for sort-by-multi-column
+        
+        Returns the Table object to allow operation stringing
+            This is needed because you cannot override the default
+            behavior of the builtin sorted() function.
+        
+        Example:
+            # Return a table of the top 5 values in column B
+            top5 = mytable.sort('B', reverse=True)[:5]
         '''
         super(LookupTable, self).sort(key, reverse)
         self._update_indexes()
         return self
     
-    def sort_by_col(self, col, reverse=False):
+    def index(self, row, start=None, stop=None):
         '''
-        Sort the rows by column or columns
-        col must be a column header string, column index, or list of string/index
+        Returns the index of value in the LookupTable
         
-        This function is syntactic sugar for sort(key=operator.itemgetter(col))
+        row can be either a Row object or the lookup value
+            of the row
         '''
-        super(LookupTable, self).sort(col, reverse)
-        self._update_indexes()
-        return self
+        if isinstance(row, self.Row):
+            row = row._lookup()
+        irows = self._index.get(row, [])
+        for irow in irows:
+            if stop is not None and stop <= irow:
+                break
+            if start is not None and start < irow:
+                continue
+            return irow
+        raise ValueError('%s is not in the LookupTable' % row)
+    
+    def count(self, row):
+        '''
+        Returns the number of times row exists in the LookupTable
+        
+        row can be either a Row object or the result of
+            passing the Row object to the lookup function
+        '''
+        if isinstance(row, self.Row):
+            row = row._lookup()
+        return len(self._index.get(row, ()))
+    
+    def remove(self, row):
+        '''
+        Removes first occurrence of row in the Table.
+        Raises ValueError if the row is not present.
+        
+        row can be either a Row object or the result of
+            passing the Row object to the lookup function
+        '''
+        self.pop(self.index(row))
     
     def take(self, func_or_indexes):
         '''
         Returns a new LookupTable comprised of rows contained in indexes
         or where func(row) returns True
         '''
-        lookup = getattr(self, '_lookup_comp', self.lookup)
+        lookup = getattr(self, '_lookup_comp', self.Row._lookup_func)
         r = LookupTable(self.headers, lookup)
         if isinstance(func_or_indexes, _collections.Callable):
-            r._rows = filter(func_or_indexes, self._rows)
+            r._rows = list(filter(func_or_indexes, self._rows))
         else:
             r._rows = [self._rows[i] for i in func_or_indexes]
         r._update_indexes()
         return r
-    
-    def lookup(self, key):
-        '''
-        Returns the row matching key
-        '''
-        return self._row[self._index[key]]
-    
-    def index(self, key):
-        '''
-        Returns the index of the row matching key
-        '''
-        return self._index[key]
-    
-    def remove(self, key):
-        self.pop(self._index[key])
     
     def as_dataframe(self, index=None, dtype=None):
         '''
@@ -328,7 +395,8 @@ class LookupTable(Table):
             raise ImportError('as_dataframe() requires pandas')
         if index is None:
             # Rebuild index as list
-            lookup = self.lookup
-            index = [lookup(row) for row in self._rows]
-        return pandas.DataFrame(self._rows, columns=self.headers,
+            index = [row._lookup() for row in self._rows]
+        return pandas.DataFrame([tuple(row) for row in self._rows],
+                                columns=self.headers,
                                 index=index, dtype=dtype)
+    

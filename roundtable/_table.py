@@ -8,6 +8,7 @@ import re, types, operator, itertools, collections
 
 try:
     basestring = basestring # py 2.x
+    range = xrange
 except NameError:
     basestring = str # py 3.x
 
@@ -85,12 +86,22 @@ class RowFactory(object):
             
             def __setitem__(self, key, value):
                 try:
-                    return setattr(self, self._mapper[key], value)
+                    return object.__setattr__(self, self._mapper[key], value)
                 except KeyError:
                     if isinstance(key, int):
                         raise IndexError('Row index out of range')
                     else:
                         raise KeyError("Row has no column named '%s'" % str(key))
+                except TypeError:
+                    if isinstance(key, slice):
+                        try:
+                            indexes = range(len(self))[key]
+                        except TypeError: # py 3.1 can't use slice on range object
+                            indexes = list(range(len(self)))[key]
+                        for i, val in zip(indexes, value):
+                            self[i] = val
+                    else:
+                        raise
             
             def __delitem__(self, key):
                 try:
@@ -103,11 +114,11 @@ class RowFactory(object):
                 except TypeError:
                     if isinstance(key, slice):
                         try:
-                            for i in range(len(self))[key]:
-                                del self[i]
+                            indexes = range(len(self))[key]
                         except TypeError: # py 3.1 can't use slice on range object
-                            for i in list(range(len(self)))[key]:
-                                del self[i]
+                            indexes = list(range(len(self)))[key]
+                        for i in indexes:
+                            del self[i]
                     else:
                         raise
             
@@ -139,7 +150,9 @@ class RowFactory(object):
             def __ge__(self, other):
                 return not self < other
             
-            #TODO: add an update(dict_or_iterable) method
+            def update(self, d):
+                for key in d:
+                    self[key] = d[key]
             
         return Row
     
@@ -245,15 +258,7 @@ class Table(object):
         self._rows = map(self.Row, self._rows)
     
     def __copy__(self):
-        '''
-        Returns a shallow copy of the table
-        This can be used to get slices of the table via .filter()
-            ex. mytable.copy().filter(filter_func)
-        
-        This method is faster than using copy.copy because it avoids
-            pickling and unpickling the data
-        For a deep copy, use copy.deepcopy
-        '''
+        '''Returns a shallow copy of the table'''
         r = Table(self.headers)
         r._rows = self._rows[:]
         return r
@@ -297,6 +302,14 @@ class Table(object):
             function called on each Row in the Table
             string or int for sort-by-column
             list of strings or ints for sort-by-multi-column
+        
+        Returns the Table object to allow operation stringing
+            This is needed because you cannot override the default
+            behavior of the builtin sorted() function.
+        
+        Example:
+            # Return a table of the largest 5 values in column B
+            top5 = mytable.sort('B', reverse=True)[:5]
         '''
         if not isinstance(key, types.FunctionType):
             if isinstance(key, (int, basestring)):
@@ -305,19 +318,37 @@ class Table(object):
         self._rows.sort(key=key, reverse=reverse)
         return self
     
-    def index(self, value, start=None, stop=None):
-        value = self.Row(value)
+    def index(self, row, start=0, stop=None):
+        '''
+        Return first index or row in the Table.
+        Raises ValueError if the row is not present.
+        '''
+        if not isinstance(row, self.Row):
+            row = self.Row(row)
         if stop is not None:
             if start is None:
                 raise TypeError('cannot specify stop without start')
-            return self._rows.index(value, start, stop)
+            return self._rows.index(row, start, stop)
         if start is not None:
-            return self._rows.index(value, start)
-        return self._rows.index(value)
+            return self._rows.index(row, start)
+        return self._rows.index(row)
     
-    def count(self, value):
-        value = self.Row(value)
-        return self._rows.count(value)
+    def count(self, row):
+        '''
+        Return number of occurrences of row
+        '''
+        if not isinstance(row, self.Row):
+            row = self.Row(row)
+        return self._rows.count(row)
+    
+    def remove(self, row):
+        '''
+        Removes first occurrence of row in the Table.
+        Raises ValueError if the row is not present.
+        '''
+        if not isinstance(row, self.Row):
+            row = self.Row(row)
+        self._rows.remove(row)
     
     def take(self, func_or_indexes):
         '''

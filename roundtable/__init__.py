@@ -11,17 +11,17 @@ RoundTable is a collection of table-like containers.  King Arthur's favorite!
     `sort` allows a string `key` to indicate a sort-by-column.  Search methods
     (`index`, `count`, `__contains__`) accept either a Row object or a list or dict.
     
-    Contains two additional methods useful for tables.
-    `take(indexes_or_func)` returns a new table based on passed in indexes
-        Alternatively, applies a function to every row in the table and builds
-        a new table out of rows that evaluate to True
-    `column(colname)` returns an iterator over values in a column
+    Additional methods useful for tables:
+    * `take(indexes_or_func)` returns a new table based on passed in indexes
+      Alternatively, applies a function to every row in the table and builds
+      a new table out of rows that evaluate to True
+    * `column(colname)` returns an iterator over values in a column
     
 *LookupTable*
     A lookup function or column is added to a basic Table.  The lookup function is similar
     to a hash function, taking a Row object and returning a value.  If a column is provided,
     the value in that column is the "lookup" value.  A dict keeps track of these "lookup"
-    values, allowing fast lookups on all seach methods (index`, `count`, `__contains__`).
+    values, allowing fast lookups on all seach methods (`index`, `count`, `__contains__`).
     These search methods accept either a Row object (which is run through the lookup function)
     or the "lookup" value.  The "lookup" values do not need to be unique.
 
@@ -70,7 +70,7 @@ Table object can be transformed into:
 Author: Jim Kitchen
 Created: 2012-09-12
 '''
-__version__ = '0.3'
+__version__ = '0.4'
 
 from ._table import Table
-from ._lookuptable import LookupTable, DuplicateKeyError
+from ._lookuptable import LookupTable

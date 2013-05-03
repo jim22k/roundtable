@@ -48,7 +48,7 @@ class TestTableEquivalency:
         assert self.t[1] is q[1]
 
 class TestTableAddRemoveRows:
-    '''Test append, extend, insert, pop, del'''
+    '''Test append, extend, insert, pop, del, remove'''
     def setUp(self):
         self.headers = ['x', 'y', 'z']
         self.t = Table(self.headers)
@@ -129,6 +129,23 @@ class TestTableAddRemoveRows:
     def test_del_bad_index(self):
         self.t.append((1,2,3))
         del self.t[10]
+    
+    def test_remove(self):
+        self.t.append((1,2,3))
+        self.t.append((2,3,4))
+        self.t.append((1,2,3))
+        self.t.remove((1,2,3))
+        assert len(self.t) == 2
+        assert self.t[0] == (2,3,4)
+        assert self.t[1] == (1,2,3)
+        self.t.remove((1,2,3))
+        assert len(self.t) == 1
+        assert self.t[0] == (2,3,4)
+    
+    @raises(ValueError)
+    def test_remove_invalid(self):
+        self.t.append((1,2,3))
+        self.t.remove((2,3,4))
 
 class TestTableAccess:
     '''Test __getitem__'''

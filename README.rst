@@ -1,6 +1,8 @@
 roundtable
 ==========
 
+*King Arthur's finest collection of table-like containers [for Python]*
+
 **Table**
     Think of this as a list of namedtuples, except the elements of the namedtuples
     can be edited.  The table is initialized with a list of column header names.

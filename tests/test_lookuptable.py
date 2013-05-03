@@ -1,6 +1,6 @@
 from nose.tools import raises
-from roundtable import LookupTable, DuplicateKeyError
-import collections
+from roundtable import LookupTable
+import collections, copy
 
 class TestCreateLookupTable:
     def setUp(self):
@@ -10,27 +10,28 @@ class TestCreateLookupTable:
     def test_build_row_with_strings(self):
         t = LookupTable(self.headers, self.func)
         assert t.headers == ('id', 'x', 'y')
-        assert t.lookup is self.func
+        row = t.Row(('a', 1, 2))
+        assert row._lookup() == self.func(row)
     
     def test_build_row_with_int(self):
         t = LookupTable(5, 'id')
         assert len(t.headers) == 5
-        assert isinstance(t.lookup, collections.Callable)
+        assert isinstance(t.Row._lookup_func, collections.Callable)
     
     def test_build_func(self):
         t = LookupTable(self.headers, self.func)
         row = t.Row(('a', 1, 2))
-        assert t.lookup(row) == 'a:(1,2)'
+        assert row._lookup() == 'a:(1,2)'
     
     def test_build_column(self):
         t = LookupTable(self.headers, 'id')
         row = t.Row(('a', 1, 2))
-        assert t.lookup(row) == 'a'
+        assert row._lookup() == 'a'
     
     def test_build_columns(self):
         t = LookupTable(self.headers, ('id', 'y', 'x'))
         row = t.Row(('a', 1, 2))
-        assert t.lookup(row) == ('a', 2, 1)
+        assert row._lookup() == ('a', 2, 1)
 
 class TestTableEquivalency:
     '''Test __eq__ and copy'''
@@ -82,17 +83,22 @@ class TestTableEquivalency:
         func = lambda row: row['x'] + row['y']
         t = LookupTable(self.headers, func)
         t.append((1,2,3))
-        assert t == t.copy()
-        assert t is not t.copy()
+        t2 = copy.copy(t)
+        assert t == t2
+        assert t is not t2
+        assert t[0] is t2[0]
     
     def test_copy_is_equal_column(self):
         t = LookupTable(self.headers, 'id')
         t.append((1,2,3))
-        assert t == t.copy()
-        assert t is not t.copy()
-        t2 = LookupTable(self.headers, 'id')
-        t2.append((1,2,3))
-        assert t2 == t.copy()
+        t2 = copy.copy(t)
+        assert t == t2
+        assert t is not t2
+        assert t[0] is t2[0]
+        t3 = LookupTable(self.headers, 'id')
+        t3.append((1,2,3))
+        assert t3 == t2
+        assert t3[0] is not t2[0]
     
     def test_notequal(self):
         t = LookupTable(self.headers, 'id')

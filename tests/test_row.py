@@ -197,6 +197,18 @@ class TestRowUpdate:
         self.row.CapCol = -500
         assert tuple(self.row) == (1, 2, 3.5, -500)
     
+    def test_set_value_by_slice(self):
+        self.row[0:2] = (-1, -2)
+        assert tuple(self.row) == (-1, -2, 3.5, 14)
+    
+    def test_set_value_by_slice2(self):
+        self.row[1:4:2] = (-1, -2)
+        assert tuple(self.row) == (1, -1, 3.5, -2)
+        
+    def test_update_method(self):
+        self.row.update({'y': -7, 'CapCol': 'missing'})
+        assert tuple(self.row) == (1, -7, 3.5, 'missing')
+    
     def test_del_value_by_index(self):
         del self.row[0]
         assert tuple(self.row) == (None, 2, 3.5, 14)
